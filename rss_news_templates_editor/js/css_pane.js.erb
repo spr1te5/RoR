@@ -1,0 +1,60 @@
+var NewsApps = NewsApps || {};
+NewsApps.RulesEditor = NewsApps.RulesEditor || {};
+
+NewsApps.RulesEditor.CssPane = function(rules) {
+  var self = this,
+      _rules = [];
+
+  this._css = ko.observable();
+
+  this.rules = function() {
+    var value = self._css(),
+        rule = _rules[0];
+
+    if (!value || 0 === value.trim().length) {
+      if (rule) {
+        if (rule['id'])
+          rule['_destroy'] = 1;
+        else
+          _rules.splice(_rules.indexOf(rule), 1);
+      }
+    } else {
+      if (rule) {
+        if (rule['_destroy'])
+          delete rule['_destroy'];
+        rule['rule'] = value;
+      } else {
+        rule = {
+          operator_type: '<%= NewsApps::Core::TransformationRule::OPERATOR_TYPE_APPEND %>',
+          operator: '<%= NewsApps::Core::TransformationRule::OPERATOR_TYPE_APPEND_PLAIN_CSS %>',
+          rule: value
+        }
+        _rules.push(rule);
+      }
+    }
+
+    return _rules;
+  };
+
+  this.onRulesSaved = function(newRules) {
+    applyRules(newRules);
+  };
+
+  function applyRules(rules) {
+    _rules.length = 0;
+    rules.every(function(r) {
+      if (0 !== _rules.length)
+        return false;
+
+      if ('<%= NewsApps::Core::TransformationRule::OPERATOR_TYPE_APPEND %>' === r['operator_type'] &&
+          '<%= NewsApps::Core::TransformationRule::OPERATOR_TYPE_APPEND_PLAIN_CSS %>' == r['operator']) {
+        self._css(r['rule']);
+       _rules.push(r);
+      }
+
+      return true;
+   });
+  };
+
+  applyRules(rules);  
+};

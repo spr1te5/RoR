@@ -1,0 +1,82 @@
+var NewsApps = NewsApps || {};
+NewsApps.RulesEditor = NewsApps.RulesEditor || {};
+
+NewsApps.RulesEditor.CssFilesPane = function(rules) {
+  var self = this,
+      _rules = [];
+
+  var FileRow = function(rule) {
+    this.rule = rule;
+    this.file = ko.observable(rule['rule']);
+    this.visible = ko.observable(true);
+  };
+
+  this.files = ko.observableArray();
+
+  this.addFile = function() {
+    var rule = {
+          operator_type: '<%= NewsApps::Core::TransformationRule::OPERATOR_TYPE_DOWNLOAD %>',
+          operator: '<%= NewsApps::Core::TransformationRule::OPERATOR_TYPE_FILE_DOWNLOAD_CSS %>',
+        },
+        row = new FileRow(rule);
+    self.files.push(row);
+    _rules.push(rule);
+  };
+
+  this.rules = function() {
+    collectRules();
+    return _rules;
+  };
+
+  this.removeFile = function(row) {
+    if (!confirm('Вы уверены ?'))
+      return;
+
+    if (row.rule['id']) {
+      row.rule['_destroy'] = 1;
+      row.visible(false);
+    } else {
+      _rules.splice(_rules.indexOf(row.rule), 1);      
+      self.files.remove(row);
+    }
+  };
+
+  this.onRulesSaved = function(newRules) {
+    applyRules(newRules);
+  };
+
+  function applyRules(rules) {
+    _rules.length = 0;
+    self.files.removeAll();
+    rules.forEach(function(r) {
+      if ('<%= NewsApps::Core::TransformationRule::OPERATOR_TYPE_DOWNLOAD %>' === r['operator_type'] &&
+          '<%= NewsApps::Core::TransformationRule::OPERATOR_TYPE_FILE_DOWNLOAD_CSS %>' == r['operator']) {
+        self.files.push(new FileRow(r));
+        _rules.push(r);
+    }
+   });
+  };
+
+  function collectRules() {
+    var value, rule;
+
+    self.files()
+        .forEach(function(row) {
+      value = row.file();
+      rule = row.rule;
+
+      if (!value || 0 === value.trim().length) {
+        if (rule['id'])
+          rule['_destroy'] = 1;
+        else
+          _rules.splice(_rules.indexOf(rule), 1);
+      } else {
+        if (rule['_destroy'])
+          delete rule['_destroy'];
+        rule['rule'] = value;
+      }
+    });    
+  };
+
+  applyRules(rules);
+}

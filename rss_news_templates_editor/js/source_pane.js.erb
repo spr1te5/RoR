@@ -1,0 +1,483 @@
+var NewsApps = NewsApps || {};
+NewsApps.RulesEditor = NewsApps.RulesEditor || {};
+
+NewsApps.RulesEditor.SourcePane = function($iframe, 
+                                            initialRules, 
+                                            classesStopListSource,
+                                            classesStopPrefixesListSource,
+                                            idStopPrefixesListSource) {
+  var self = this,
+      _rules = [],
+      _removedItems = [],
+      _unclickedItems = [];
+
+  this.htmlSrc = ko.observable();
+  this.htmlLoaded = ko.observable(false);
+
+  var bordersMarker = new NewsApps.RulesEditor.BordersMarker({
+    onShow: function(el, e) {
+      contextMenu.show(e.clientX, e.clientY, el);
+    }
+  });
+
+  /*
+  * Context menu.
+  */  
+  var contextMenu = new NewsApps.RulesEditor.сontextMenu();
+  var contextMenuItems = [
+    /* Hide/show */
+    {
+      title: 'Скрыть',
+      onClick: function(el) { blure(el); },
+      isActive: function(el) { return !isRemoved(el) && !isParentRemoved(el); }
+    },
+    {
+      title: 'Восcтановить',
+      onClick: function(el) { unblure(el); },
+      isActive: function(el) { return isRemoved(el); }
+    },
+
+    /* Remove/restore clickability */
+    {
+      title: 'Убрать кликабельность',
+      onClick: function(el) { removeClickability(el); },
+      isActive: function(el) { 
+        var desc = describeEl(el);
+        return !desc['removed'] && !desc['parent_removed'] &&
+               desc['clickable'] && !desc['click_disabled'];
+      }
+    },
+    {
+      title: 'Восcтановить кликабельность',
+      onClick: function(el) { restoreClickability(el); },
+      isActive: function(el) { return isClickDisabled(el); }
+    }
+  ];
+
+  $iframe.on('load', function(e){
+    var contents = $iframe.contents(),
+        doc = this.contentDocument;
+    
+    initNavigationCapture(contents);
+    NewsApps.RulesEditor.setupIframe($iframe);
+
+    if (_rules)
+      applyRules(this);
+
+    // console.log(this.contentWindow);
+    bordersMarker.init(doc);
+    contextMenu.init(doc, contextMenuItems);
+
+    self.htmlLoaded(true);    
+  });
+
+  this.load = function(url){ 
+    this.init();
+    this.htmlSrc(url);
+  };
+
+  this.init = function() {
+    self.htmlLoaded(false);
+    _removedItems.length = 0;
+  };
+
+  this.rules = function(options) {
+    var list = _rules;
+    if (!list)
+      return [];
+
+    var skipRemoved = options && options.skipRemoved,
+        selected = !skipRemoved ?  list : ko.utils.arrayFilter(list, function(r) { return !r['_destroy']; });;
+
+    return selected; 
+  };
+
+  this.onRulesSaved = function(newRules) {
+    catchRules(newRules);
+    applyRules($iframe.get(0));
+  };
+
+  function initNavigationCapture(contents) {
+    var body = contents.find('body')
+                       .get(0);
+
+    body.addEventListener('mousedown', function(e){
+      switch(e.which) {
+        case 1:
+          contextMenu.hide();   
+          break;
+        case 3:
+          contextMenu.show(e.clientX, e.clientY, e.target);    
+          break;
+      }
+    });
+
+    body.addEventListener('mouseover', function(e){
+      e.stopPropagation();
+
+      var SELECTION = 'selection',
+          RESTRICTION = 'restriction';
+
+      var el = e.target,
+          desc = describeEl(el),
+          action = SELECTION;
+
+      if (desc['removed'] ||
+          desc['clickable'] && desc['click_disabled'])
+        action = RESTRICTION;
+
+      switch(action) {
+        case SELECTION:
+            highlightSelection(el);
+          break;
+        case RESTRICTION:
+          highlightRestriction(el);
+      }
+    });
+
+    body.addEventListener('mouseout', function(e){
+      bordersMarker.hide();
+    });
+  };
+
+  function isClickDisabled(el) {
+    var _el = getClickable(el),
+        idx = _unclickedItems.indexOf(_el);
+    return idx !== -1 && !_el.restored;
+  };
+
+  function isClickable(el) {
+    return isClickableTag(getClickable(el));
+  };
+
+  function isClickableTag(node) {
+    return node ? 'a' === node.tagName.toLowerCase() : false;
+  };
+
+  function getClickable(el) {
+    var clickable = isClickableTag(el),
+        _el = el;
+
+    if (!clickable) {
+      _el = _el.parentNode;
+      if (_el)
+        clickable = isClickableTag(_el);
+    }
+
+    return clickable ? _el : null;
+  };
+
+  function highlightSelection(el) {
+    bordersMarker.highlight(el, {borderStyle: '5px dotted blue'});
+  };
+
+  function highlightRestriction(el) {
+    bordersMarker.highlight(el);
+  };
+
+  function describeEl(el) {
+    var desc = {};
+
+    if (isRemoved(el))
+      desc['removed'] = true;
+
+    if (desc['removed']) {
+      return desc;
+    }
+
+    if (!desc['removed'] && isParentRemoved(el))
+      desc['parent_removed'] = true;
+
+    if (isClickable(el)) {
+      desc['clickable'] = true;
+      if (isClickDisabled(el)) 
+        desc['click_disabled'] = true;
+    }
+
+    return desc;
+  };
+
+  function blurEl($el) {
+    // $el.data('old-opacity', $el.css('opacity') || '1');
+    $el.css('opacity', '0.3');
+  };
+
+  function unBlurEl($el) {
+    $el.css('opacity', '1');
+  };
+
+  function blure(el) {
+    var $el = $(el),
+        removed = $el.data('removed-by-editor');
+    if (!removed && !isParentRemoved(el)) {
+      $el.data('removed-by-editor', true);
+      blurEl($el);
+      removeEl(el);
+    }
+  };
+
+  function unblure(el) {
+    var $el = $(el),
+        removed = $el.data('removed-by-editor');
+    if (removed) {
+      restoreEl(el);      
+      unBlurEl($el);
+      $el.data('removed-by-editor', false);
+    }
+  };
+
+  this.removed = function() {
+    return _removedItems;
+  };
+
+  function removeEl(el) {
+    appendElRule(el);
+  };
+
+  function restoreEl(el) {
+    removeElRule(el);
+  };
+
+  function isClassNameAllowed(name) {
+    var allowed = true, 
+        list;    
+
+    list = classesStopListSource();
+    if (list)
+      allowed = list.indexOf(name) == -1;
+
+    if (allowed) {
+      list = classesStopPrefixesListSource();
+      if (list)
+        allowed = stringPrefixAllowed(list, name);
+    }
+
+    return allowed;
+  };
+
+  function idValueAllowed(value) {
+    var list = idStopPrefixesListSource();
+    return stringPrefixAllowed(list, value);
+  };
+
+  function stringPrefixAllowed(stopPrefixes, string) {
+    return !ko.utils.arrayFirst(stopPrefixes, function(stop){ return string.search(stop) == 0; });
+  };
+
+  function constructContains(attrName, value) {
+    var result = null,
+        str;
+    switch (attrName) {
+      case 'class':
+           result = value.split(' ')
+                         .reduce(function(acc, current){
+                           if (current && current.length !== 0 && isClassNameAllowed(current)) {
+                             str = '(@'+attrName+'="'+current+'" or ' +
+                                   'contains(@'+attrName+'," '+current+'") or ' +
+                                   'contains(@'+attrName+',"'+current+' ") or ' +
+                                   'contains(@'+attrName+'," '+current+' "))';
+                             acc.push(str);
+                           }
+                           return acc;
+                         },[])
+                         .join(' and ');
+
+          if (0 !== result.length)
+            result = '('+result+')';
+          else
+            result = null;
+        break;
+      case 'id':
+        if (idValueAllowed(value))
+          result = '(@'+attrName+'="'+value+'")';
+        break;
+      default: 
+        result = '(@'+attrName+'="'+value+'")';
+    }
+    return result;
+  };
+
+  function buildXpathForEl(el) {
+    var current = el,
+        path = [], 
+        classes;
+    while (current && current.tagName) {
+      var str = current.tagName.toLowerCase(),
+          attrs = current.attributes,
+          attrsContains = [],
+          attrName;
+
+      if (attrs)
+        for (var cx=0, constr;cx<attrs.length;cx++){
+          attrName = attrs[cx].name;
+          if ('class' == attrName || 'lang' == attrName || 'href' == attrName || 'src' == attrName || 'id' == attrName){
+            constr = constructContains(attrName, attrs[cx].value);
+            if (constr)
+              attrsContains.push(constr);
+          }
+        }
+
+      if (0 !== attrsContains.length)
+        str += '['+attrsContains.join(' or ')+']';
+
+      path.push(str);
+      current = current.parentNode;
+    }
+
+    path.reverse();
+    return '/'+path.join('/');
+  };
+
+  function isParentRemoved(el) {
+    var current = el.parentNode,
+        found = false;
+    while (!found && current && current.tagName) {
+      if ($(current).data('removed-by-editor'))
+        found = true;
+      if (!found)
+        current = current.parentNode;
+    }
+    return found;
+  };
+
+  function isRemoved(el) {
+    var nodeIdx = _removedItems.indexOf(el);
+    return nodeIdx !== -1 && !_removedItems[nodeIdx].restored;
+  };
+
+  function catchRules(newRules) {
+    if (!newRules)
+      return;
+
+    _rules.length = 0;
+    
+    newRules.forEach(function(r) {
+      switch(r['operator_type']) {
+        case '<%= NewsApps::Core::TransformationRule::OPERATOR_TYPE_XPATH %>':
+          _rules.push(r);
+        break;  
+      }
+    });
+  };
+
+  function applyRules(iframe) {
+    var rules = _rules;
+    if (!rules)
+      return;
+
+    var doc = iframe.contentDocument, 
+        el,
+        $el;
+
+    _removedItems.length = 0;
+    _unclickedItems.length = 0;
+
+    rules.forEach(function(r) {
+      switch(r['operator_type']) {
+        case '<%= NewsApps::Core::TransformationRule::OPERATOR_TYPE_XPATH %>':
+          el = findByXpath(doc, r['rule']); //can be more than 1.
+          
+          if (el) {
+            el.xpathRule = r;            
+            switch (r['operator']) {
+              case '<%= NewsApps::Core::TransformationRule::OPERATOR_XPATH_REMOVE_NODE_BY_SELECTOR %>':
+                $el = $(el);
+                if (!r['_destroy']) {
+                  $el.data('removed-by-editor', true);          
+                  blurEl($el);
+                  _removedItems.push(el);
+                }
+              break; 
+
+              case '<%= NewsApps::Core::TransformationRule::OPERATOR_XPATH_REMOVE_NODE_CLICKABILITY %>':
+                if (!r['_destroy'])
+                  _unclickedItems.push(el);
+            }
+          }
+        break;  
+      }
+    });
+  };
+
+  function findByXpath(doc, selector) {
+    return doc.evaluate(selector, doc, null, XPathResult.ANY_TYPE, null)
+              .iterateNext();
+  };
+
+  function excludeEl(el, $el) {
+    try {
+      var jqEl = $el || $(el);
+      blurEl(jqEl);
+      removeEl(el);
+    } catch(_e) {}
+  };
+
+  function appendElRule(el) {
+    _addRule(el, 
+             _removedItems, 
+             '<%= NewsApps::Core::TransformationRule::OPERATOR_TYPE_XPATH %>',
+             '<%= NewsApps::Core::TransformationRule::OPERATOR_XPATH_REMOVE_NODE_BY_SELECTOR %>');
+  };
+
+  function _removeRule(el, items) {
+    var rule = el.xpathRule;
+    if (rule['id']) {
+      rule['_destroy'] = 1;
+      el.restored = true;
+    } else {
+      el.xpathRule = null;
+      _rules.splice(_rules.indexOf(rule), 1);
+      items.splice(items.indexOf(el), 1);
+    }
+  };
+
+  function _addRule(el, items, operatorType, operator) {
+    var rule = el.xpathRule;
+    if (rule) {
+      el.restored = false;
+      if (rule['id']) {
+        if (rule['_destroy'])
+          delete rule['_destroy'];
+      }
+    } else {
+      rule = {
+        operator_type: operatorType,
+        operator: operator,
+        rule: buildXpathForEl(el)
+      };
+      _rules.push(rule);
+      el.xpathRule = rule;
+      items.push(el);
+    }
+  }
+
+  function removeElRule(el) {
+    _removeRule(el, _removedItems);
+  };
+
+  function removeClickability(el) {
+    _addRule(getClickable(el), 
+             _unclickedItems,
+             '<%= NewsApps::Core::TransformationRule::OPERATOR_TYPE_XPATH %>',
+             '<%= NewsApps::Core::TransformationRule::OPERATOR_XPATH_REMOVE_NODE_CLICKABILITY %>'
+             );
+  };
+
+  function restoreClickability(el) {
+    _removeRule(getClickable(el), _unclickedItems);
+  };
+
+  catchRules(initialRules);
+
+  this.ri = function() {
+    return _removedItems;
+  };
+
+  this.r = function() {
+    return _rules;
+  };
+
+  this.uc = function() {
+    return _unclickedItems;
+  };
+};

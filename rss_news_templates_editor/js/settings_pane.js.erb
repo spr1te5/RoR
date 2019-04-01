@@ -1,0 +1,130 @@
+var NewsApps = NewsApps || {};
+NewsApps.RulesEditor = NewsApps.RulesEditor || {};
+
+NewsApps.RulesEditor.SettingsPane = function(initialRules) {
+  var self = this,
+      _rules = [];
+
+  this._classesStopList = ko.observable();
+  this._classesStopPrefixesList = ko.observable();
+  this._idStopPrefixesList = ko.observable();
+
+  this.rules = function() {
+    collectRules();
+    return _rules;
+  };
+
+  this.classesStopList = function(){
+    return fieldAsArray(self._classesStopList());
+  };
+
+  this.classesStopPrefixesList = function(){
+    return fieldAsArray(self._classesStopPrefixesList());
+  };
+
+  this.idStopPrefixesList = function(){
+    return fieldAsArray(self._idStopPrefixesList());
+  };
+
+  this.onRulesSaved = function(newRules) {
+    applyRules(newRules);
+  };
+
+  function fieldAsArray(field) {
+    var result = [],
+        list,
+        array,
+        value;
+
+    if (field) {
+      list = field.trim();
+      array = list.split(' ');
+      if (0 !== array.length)
+        array.forEach(function(current){
+          value = current.trim();
+          if (0 !== value.length)
+            result.push(value);
+        });
+    }
+
+    return result;
+  };
+
+  function applyRules(newRules) {
+    _rules.length = 0;
+    newRules.forEach(function(r) {
+      switch(r['operator_type']) {
+        case '<%= NewsApps::Core::TransformationRule::OPERATOR_TYPE_CONSTRAINTS %>':
+          switch(r['operator']) {
+            case '<%= NewsApps::Core::TransformationRule::OPERATOR_TYPE_CONSTRAINTS_SKIP_CSS_CLASSES %>':
+              self._classesStopList(r['rule']);
+              _rules.push(r);
+              break;
+            case '<%= NewsApps::Core::TransformationRule::OPERATOR_TYPE_CONSTRAINTS_SKIP_CSS_CLASSES_STARTED_WITH %>':
+              self._classesStopPrefixesList(r['rule']);
+              _rules.push(r);
+              break;
+            case '<%= NewsApps::Core::TransformationRule::OPERATOR_TYPE_CONSTRAINTS_SKIP_IDS_STARTED_WITH %>':
+              self._idStopPrefixesList(r['rule']);
+              _rules.push(r);
+              break
+          }   
+        break;
+      }
+    });
+  };
+
+  function _findRule(operator_type, operator) {
+    return ko.utils.arrayFirst(_rules, function(r) {
+      return operator_type == r['operator_type'] && operator == r['operator'];
+    });
+  };
+
+  function _collectOperationRule(operator_type, operator, listProvider, ruleProvider) {
+    var list = listProvider(),
+        rule = _findRule(operator_type, operator),
+        value = ruleProvider(),
+        ruleValue = value && value.trim();
+
+    if (0 !== list.length) {
+      if (rule) {
+        rule['rule'] = ruleValue;
+        if (rule['_destroy'])
+          delete rule['_destroy'];
+      } else {
+        rule = {
+          operator_type: operator_type,
+          operator: operator,
+          rule: ruleValue
+        }
+        _rules.push(rule);
+      }
+    } else {
+      if (rule) {
+         if (rule['id'])
+           rule['_destroy'] = 1;
+         else
+           _rules.splice(_rules.indexOf(rule), 1);
+      }
+    }
+  };
+
+  function collectRules() {
+    _collectOperationRule('<%= NewsApps::Core::TransformationRule::OPERATOR_TYPE_CONSTRAINTS %>', 
+                          '<%= NewsApps::Core::TransformationRule::OPERATOR_TYPE_CONSTRAINTS_SKIP_CSS_CLASSES %>',
+                          self.classesStopList,
+                          self._classesStopList);
+
+    _collectOperationRule('<%= NewsApps::Core::TransformationRule::OPERATOR_TYPE_CONSTRAINTS %>', 
+                          '<%= NewsApps::Core::TransformationRule::OPERATOR_TYPE_CONSTRAINTS_SKIP_CSS_CLASSES_STARTED_WITH %>',
+                          self.classesStopPrefixesList ,
+                          self._classesStopPrefixesList);
+
+    _collectOperationRule('<%= NewsApps::Core::TransformationRule::OPERATOR_TYPE_CONSTRAINTS %>', 
+                          '<%= NewsApps::Core::TransformationRule::OPERATOR_TYPE_CONSTRAINTS_SKIP_IDS_STARTED_WITH %>',
+                          self.idStopPrefixesList,
+                          self._idStopPrefixesList);
+  };
+
+  applyRules(initialRules);
+};
